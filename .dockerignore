@@ -1,0 +1,13 @@
+data_runtime/
+data_archive/
+backups/
+.git/
+.codegraph/
+.cursor/
+__pycache__/
+*.md
+*.log
+.env
+.env.*
+config/.env
+**/config/.env

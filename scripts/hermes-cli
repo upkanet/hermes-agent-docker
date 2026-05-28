@@ -1,0 +1,458 @@
+#!/usr/bin/env bash
+# ============================================================
+# Hermes Agent - CLI orchestration via Docker
+# Regroupe les operations Hermes utiles (exec, provider, sync, maintenance)
+# ============================================================
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+SERVICE_NAME="hermes"
+WEBUI_SERVICE_NAME="hermes-webui"
+PROGRAM_NAME="Hermes CLI Hub"
+PROGRAM_SLUG="hermes-cli"
+PROGRAM_VERSION="1.2.0"
+HERMES_BIN_DEFAULT="/opt/hermes/.venv/bin/hermes"
+
+if [[ -t 0 && -t 1 ]]; then
+  DOCKER_TTY=(-it)
+else
+  DOCKER_TTY=()
+fi
+
+compose_cmd() {
+  if docker compose version >/dev/null 2>&1; then
+    echo "docker compose"
+    return 0
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    echo "docker-compose"
+    return 0
+  fi
+  echo "Erreur: docker compose n'est pas disponible." >&2
+  exit 1
+}
+
+COMPOSE="$(compose_cmd)"
+
+compose() {
+  # shellcheck disable=SC2086
+  ${COMPOSE} "$@"
+}
+
+ensure_service_exists() {
+  if ! compose config --services | grep -qx "$SERVICE_NAME"; then
+    echo "Erreur: service '$SERVICE_NAME' introuvable dans docker-compose.yml" >&2
+    exit 1
+  fi
+}
+
+bootstrap_runtime_files() {
+  mkdir -p "$ROOT_DIR/data_runtime"
+
+  if [[ ! -f "$ROOT_DIR/data_runtime/.env" && -f "$ROOT_DIR/config/.env" ]]; then
+    cp "$ROOT_DIR/config/.env" "$ROOT_DIR/data_runtime/.env"
+    echo "[bootstrap] data_runtime/.env initialise depuis config/.env"
+  fi
+
+  if [[ ! -f "$ROOT_DIR/data_runtime/config.yaml" && -f "$ROOT_DIR/config/config.yaml" ]]; then
+    cp "$ROOT_DIR/config/config.yaml" "$ROOT_DIR/data_runtime/config.yaml"
+    echo "[bootstrap] data_runtime/config.yaml initialise depuis config/config.yaml"
+  fi
+}
+
+container_id() {
+  compose ps -q "$SERVICE_NAME"
+}
+
+is_running() {
+  local cid
+  cid="$(container_id)"
+  if [[ -z "$cid" ]]; then
+    return 1
+  fi
+  [[ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo false)" == "true" ]]
+}
+
+ensure_running() {
+  ensure_service_exists
+  bootstrap_runtime_files
+  if ! is_running; then
+    echo "Demarrage du service $SERVICE_NAME..."
+    compose up -d "$SERVICE_NAME"
+  fi
+}
+
+resolve_hermes_bin() {
+  local cid
+  cid="$(container_id)"
+  if [[ -z "$cid" ]]; then
+    echo "$HERMES_BIN_DEFAULT"
+    return 0
+  fi
+
+  if docker exec "$cid" test -x "$HERMES_BIN_DEFAULT" 2>/dev/null; then
+    echo "$HERMES_BIN_DEFAULT"
+  else
+    echo "hermes"
+  fi
+}
+
+run_hermes_exec() {
+  ensure_running
+  local cid hermes_bin
+  cid="$(container_id)"
+  hermes_bin="$(resolve_hermes_bin)"
+  docker exec "${DOCKER_TTY[@]}" "$cid" "$hermes_bin" "$@"
+}
+
+run_hermes_auto() {
+  # Si conteneur deja actif => exec; sinon run --rm
+  ensure_service_exists
+  bootstrap_runtime_files
+
+  if is_running; then
+    run_hermes_exec "$@"
+    return 0
+  fi
+
+  local hermes_bin
+  hermes_bin="$HERMES_BIN_DEFAULT"
+  echo "Conteneur arrete - lancement d'une session temporaire..."
+  compose run --rm "$SERVICE_NAME" "$hermes_bin" "$@"
+}
+
+program_header() {
+  if [[ -t 1 ]]; then
+    echo "============================================================"
+    echo "$PROGRAM_NAME ($PROGRAM_SLUG) v$PROGRAM_VERSION"
+    echo "Projet: $ROOT_DIR"
+    echo "============================================================"
+  else
+    echo "$PROGRAM_NAME v$PROGRAM_VERSION"
+  fi
+}
+
+wait_enter() {
+  echo ""
+  read -r -p "Appuie sur Entree pour continuer..." _
+}
+
+# ── WebUI helpers ──────────────────────────────────────────
+
+webui_is_running() {
+  local cid
+  cid="$(compose ps -q "$WEBUI_SERVICE_NAME" 2>/dev/null || true)"
+  [[ -n "$cid" && "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" == "true" ]]
+}
+
+ensure_webui() {
+  if ! compose config --services 2>/dev/null | grep -qx "$WEBUI_SERVICE_NAME"; then
+    echo "Erreur: service '$WEBUI_SERVICE_NAME' introuvable dans docker-compose.yml" >&2
+    echo "-> Verifie que hermes-webui est bien defini dans docker-compose.yml" >&2
+    return 1
+  fi
+}
+
+ensure_webui_running() {
+  ensure_webui || return 1
+  if ! webui_is_running; then
+    echo "Demarrage de $WEBUI_SERVICE_NAME..."
+    compose up -d "$WEBUI_SERVICE_NAME"
+  fi
+}
+
+menu_show() {
+  cat <<'EOF'
+
+Menu principal:
+  1) Ouvrir Hermes CLI (chat interactif)
+  2) Ajouter/changer provider (picker Hermes)
+  3) Login provider (commande Hermes)
+  4) Hermes doctor
+  5) Hermes setup
+  6) Sync config -> data_runtime
+  7) Sync config -> data_runtime (--force)
+  8) Maintenance data
+  9) Docker status
+  10) Docker restart hermes
+  11) Shell dans le conteneur
+  ---
+  12) WebUI: status
+  13) WebUI: logs
+  14) WebUI: restart
+  15) Ouvrir WebUI (http://localhost:8787)
+  ---
+  16) Aide commandes
+  0) Quitter
+EOF
+}
+
+menu_loop() {
+  local choice provider
+
+  while true; do
+    menu_show
+    read -r -p "Choix [0-12]: " choice
+
+    case "$choice" in
+       1)
+         run_hermes_auto
+         ;;
+       2)
+         run_hermes_exec model
+         ;;
+       3)
+         read -r -p "Nom du provider (ex: nous, openrouter, copilot): " provider
+         if [[ -n "$provider" ]]; then
+           run_hermes_exec login --provider "$provider"
+         else
+           echo "Provider vide, annule."
+         fi
+         ;;
+       4)
+         run_hermes_exec doctor
+         ;;
+       5)
+         run_hermes_exec setup
+         ;;
+       6)
+         bash "$ROOT_DIR/scripts/sync-runtime-config.sh"
+         ;;
+       7)
+         bash "$ROOT_DIR/scripts/sync-runtime-config.sh" --force
+         ;;
+       8)
+         bash "$ROOT_DIR/scripts/maintenance-data.sh"
+         ;;
+       9)
+         compose ps "$SERVICE_NAME" "$WEBUI_SERVICE_NAME"
+         ;;
+       10)
+         ensure_running
+         compose restart "$SERVICE_NAME"
+         ;;
+       11)
+         ensure_running
+         docker exec "${DOCKER_TTY[@]}" "$(container_id)" sh
+         ;;
+       12)
+         ensure_webui || { wait_enter; continue; }
+         if webui_is_running; then
+           echo "== $WEBUI_SERVICE_NAME est ACTIF"
+           compose ps "$WEBUI_SERVICE_NAME"
+         else
+           echo "== $WEBUI_SERVICE_NAME est ARRETE"
+         fi
+         ;;
+       13)
+         ensure_webui || { wait_enter; continue; }
+         compose logs --tail=50 "$WEBUI_SERVICE_NAME"
+         ;;
+       14)
+         ensure_webui_running || { wait_enter; continue; }
+         compose restart "$WEBUI_SERVICE_NAME"
+         ;;
+       15)
+         echo "Ouverture de http://localhost:8787 ..."
+         if command -v xdg-open &>/dev/null; then
+           xdg-open http://localhost:8787
+         elif command -v open &>/dev/null; then
+           open http://localhost:8787
+         else
+           echo "Ouvre http://localhost:8787 dans ton navigateur."
+         fi
+         ;;
+       16)
+         usage
+         ;;
+       0)
+         echo "Bye."
+         return 0
+         ;;
+       *)
+         echo "Choix invalide."
+         ;;
+     esac
+
+    wait_enter
+  done
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/hermes-cli [hermes-args...]
+  ./scripts/hermes-cli <commande>
+
+Commandes principales:
+  run [args...]                  Lance hermes (exec si conteneur actif, sinon run --rm)
+  exec [args...]                 Lance hermes dans le conteneur actif (demarre si besoin)
+  model [args...]                Alias: hermes model
+  doctor [args...]               Alias: hermes doctor
+  setup [args...]                Alias: hermes setup
+  config [args...]               Alias: hermes config
+  auth [args...]                 Alias: hermes auth
+
+Provider (standard Hermes):
+  provider add [--no-browser]    Ouvre le picker provider/model (hermes model)
+  provider login [provider]      Lance hermes login (optionnel: --provider)
+
+Ops Docker utilitaires:
+  start                          Demarre le service hermes
+  stop                           Stop le service hermes
+  restart                        Redemarre le service hermes
+  status                         Etat docker compose des services
+  shell                          Ouvre un shell dans le conteneur hermes
+
+WebUI:
+  webui status                   Etat du service hermes-webui
+  webui logs [--tail=100]        Logs du service hermes-webui
+  webui restart                  Redemarre hermes-webui
+  webui stop                     Arrete hermes-webui
+  webui start                    Demarre hermes-webui
+
+Maintenance locale:
+  sync-config [--force|--dry-run]
+                                 Synchronise config/ -> data_runtime/
+  maintenance [args...]          Lance scripts/maintenance-data.sh
+
+Aide:
+  menu                          Ouvre le menu interactif interne
+  help | -h | --help
+EOF
+}
+
+cmd_provider() {
+  local sub="${1:-}"
+  shift || true
+
+  case "$sub" in
+    add)
+      run_hermes_exec model "$@"
+      ;;
+    login)
+      if [[ $# -gt 0 ]]; then
+        run_hermes_exec login --provider "$1"
+      else
+        run_hermes_exec login
+      fi
+      ;;
+    *)
+      echo "Usage provider:" >&2
+      echo "  ./scripts/hermes-cli provider add [--no-browser]" >&2
+      echo "  ./scripts/hermes-cli provider login [provider]" >&2
+      exit 1
+      ;;
+  esac
+}
+
+main() {
+  local cmd="${1:-}"
+
+  program_header
+
+  if [[ -z "$cmd" ]]; then
+    if [[ -t 0 && -t 1 ]]; then
+      menu_loop
+    else
+      run_hermes_auto
+    fi
+    exit 0
+  fi
+
+  case "$cmd" in
+    -h|--help|help)
+      usage
+      ;;
+    menu)
+      if [[ -t 0 && -t 1 ]]; then
+        menu_loop
+      else
+        echo "Mode menu indisponible sans terminal interactif."
+        exit 1
+      fi
+      ;;
+    run)
+      shift
+      run_hermes_auto "$@"
+      ;;
+    exec)
+      shift
+      run_hermes_exec "$@"
+      ;;
+    model|doctor|setup|config|auth|skills|tools|sessions|gateway|cron|memory|status)
+      shift
+      run_hermes_exec "$cmd" "$@"
+      ;;
+    provider)
+      shift
+      cmd_provider "$@"
+      ;;
+    start)
+      ensure_running
+      compose ps "$SERVICE_NAME"
+      ;;
+    stop)
+      compose stop "$SERVICE_NAME"
+      ;;
+    restart)
+      ensure_running
+      compose restart "$SERVICE_NAME"
+      ;;
+    shell)
+      ensure_running
+      docker exec "${DOCKER_TTY[@]}" "$(container_id)" sh
+      ;;
+    webui)
+      shift
+      cmd="${1:-status}"
+      shift || true
+      case "$cmd" in
+        status|ps)
+          ensure_webui || exit 1
+          if webui_is_running; then
+            echo "== $WEBUI_SERVICE_NAME est ACTIF"
+            compose ps "$WEBUI_SERVICE_NAME"
+          else
+            echo "== $WEBUI_SERVICE_NAME est ARRETE"
+          fi
+          ;;
+        logs)
+          compose logs "$@" "$WEBUI_SERVICE_NAME"
+          ;;
+        restart)
+          ensure_webui_running || exit 1
+          compose restart "$WEBUI_SERVICE_NAME"
+          ;;
+        stop)
+          compose stop "$WEBUI_SERVICE_NAME"
+          ;;
+        start)
+          ensure_webui || exit 1
+          compose up -d "$WEBUI_SERVICE_NAME"
+          ;;
+        *)
+          echo "Usage: $0 webui {status|logs|restart|stop|start}" >&2
+          exit 1
+          ;;
+      esac
+      ;;
+    sync-config)
+      shift
+      bash "$ROOT_DIR/scripts/sync-runtime-config.sh" "$@"
+      ;;
+    maintenance)
+      shift
+      bash "$ROOT_DIR/scripts/maintenance-data.sh" "$@"
+      ;;
+    *)
+      # fallback: transmet directement a hermes
+      run_hermes_auto "$@"
+      ;;
+  esac
+}
+
+main "$@"

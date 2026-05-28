@@ -1,0 +1,148 @@
+# ============================================================
+# Hermes Agent - Configuration
+# Non-secret settings. Secrets (API keys) go in .env
+# ============================================================
+
+# --- Model Configuration ---
+# Pick your provider and model. OpenRouter is the most flexible (single API key
+# gives you access to almost every model). See README.md for more options.
+#
+# OpenRouter free model examples (copy/paste model id):
+# - deepseek/deepseek-v4-flash:free
+# - poolside/laguna-m.1:free
+# - openai/gpt-oss-120b:free
+# - z-ai/glm-4.5-air:free
+# - nvidia/nemotron-3-super-120b-a12b:free
+# - meta-llama/llama-3.3-70b-instruct:free
+# - qwen/qwen3-coder:free
+# - qwen/qwen3-next-80b-a3b-instruct:free
+# - google/gemma-4-26b-a4b-it:free
+# - google/gemma-4-31b-it:free
+model:
+  provider: copilot   # openrouter | anthropic | openai | nous | custom | ollama | google | kimi-coding | copilot
+  default: gpt-5-mini
+
+  # For custom providers (self-hosted, Ollama, etc.)
+  # provider: custom
+  # model: my-model
+  # base_url: http://localhost:8000/v1
+  # api_key: ${OPENAI_API_KEY}
+
+  # Context window (leave empty for auto-detect)
+  # context_length: 200000
+
+# --- Fallback Model ---
+# fallback_model:
+#   provider: openrouter
+#   model: google/gemini-3-flash
+
+# --- Auxiliary Models (cheaper models for side tasks) ---
+auxiliary:
+  vision:
+    provider: auto
+    model: ""
+  web_extract:
+    provider: auto
+    model: ""
+  title_generation:
+    provider: auto
+    model: ""
+  compression:
+    provider: auto
+    model: ""
+
+# --- Terminal Backend ---
+terminal:
+  backend: local                # local | docker | ssh | modal | daytona
+  timeout: 180
+
+  # Docker backend settings (uncomment if using docker backend)
+  # backend: docker
+  # docker_image: "nikolaik/python-nodejs:python3.11-nodejs20"
+  # docker_mount_cwd_to_workspace: false
+  # docker_run_as_host_user: false
+  # docker_forward_env:
+  #   - "GITHUB_TOKEN"
+  # docker_volumes:
+  #   - "/home/user/projects:/workspace/projects"
+  # container_cpu: 1
+  # container_memory: 5120
+  # container_persistent: true
+
+# --- Agent Settings ---
+agent:
+  max_turns: 50
+  api_max_retries: 3
+
+# --- Memory ---
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  memory_char_limit: 4000
+  user_char_limit: 2500
+
+# --- Context Compression ---
+compression:
+  enabled: true
+  threshold: 0.50
+  target_ratio: 0.20
+  protect_last_n: 20
+
+# --- Speech-to-Text ---
+stt:
+  enabled: true
+
+# --- Gateway Streaming ---
+gateway:
+  streaming:
+    enabled: true
+    transport: edit             # edit | auto | draft | off
+
+# --- Telegram Platform Settings ---
+platforms:
+  telegram:
+    require_mention: false
+    exclusive_bot_mentions: true
+
+    # Optional: Telegram proxy
+    # proxy_url: "socks5://127.0.0.1:1080"
+
+    # Optional: Extra Telegram features (uncomment any to enable)
+    # extra:
+    #   dm_topics:
+    #     - chat_id: 123456789
+    #       topics:
+    #         - name: General
+    #           icon_color: 7322096
+    #         - name: Work
+    #           icon_color: 9367192
+    #   disable_link_previews: false
+    #   disable_topic_auto_rename: false
+
+# --- File Read Safety ---
+file_read_max_chars: 100000
+
+# --- Tool Output Limits ---
+tool_output:
+  max_bytes: 50000
+  max_lines: 2000
+  max_line_length: 2000
+
+# --- Skills ---
+skills:
+  guard_agent_created: false
+
+# --- MCP Servers ---
+mcp_servers:
+  codegraph:
+    command: codegraph
+    args: ["serve", "--mcp"]
+    timeout: 300
+
+# --- Session DB Maintenance ---
+# Keep state.db healthy over time on gateway-heavy usage.
+sessions:
+  auto_prune: true
+  retention_days: 60
+  vacuum_after_prune: true
+  min_interval_hours: 24

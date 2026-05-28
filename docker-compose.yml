@@ -1,0 +1,90 @@
+services:
+  hermes:
+    build: .
+    container_name: hermes
+    restart: unless-stopped
+    command: gateway run
+    ports:
+      - "127.0.0.1:8642:8642"
+      - "127.0.0.1:9119:9119"
+    volumes:
+      - ./data_runtime:/opt/data
+      # IMPORTANT: do not bind-mount /opt/data/config.yaml from config/
+      # Dashboard/API settings are saved atomically (tmp + rename).
+      # A bind-mounted single file at /opt/data/config.yaml makes rename fail with EBUSY.
+      # Keep /opt/data/config.yaml inside data_runtime (writable).
+      # - ./config/config.yaml:/opt/data/config.yaml:ro
+      # IMPORTANT: do not bind-mount /opt/data/.env from config/
+      # Copilot OAuth writes token atomically via temp file + rename.
+      # A bind-mounted single file at /opt/data/.env makes rename fail with EBUSY.
+      # Keep /opt/data/.env inside data_runtime (writable), and keep config/.env
+      # only as container env source via env_file below.
+      # - ./config/.env:/opt/data/.env
+      - ./config/SOUL.md:/opt/data/SOUL.md:ro
+      # Share agent source with hermes-webui (initialized from image on first run)
+      - hermes-agent-src:/opt/hermes
+    environment:
+      - HERMES_DASHBOARD=1
+      - HERMES_UID=1000
+      - HERMES_GID=1000
+      - HF_TOKEN=${HF_TOKEN:-}
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+      - PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage
+    env_file:
+      - ./config/.env
+    shm_size: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2.0"
+
+  # ── Hermes WebUI ──────────────────────────────────────────
+  # Browser interface for Hermes Agent with full CLI parity.
+  # https://github.com/nesquena/hermes-webui
+  hermes-webui:
+    image: ghcr.io/nesquena/hermes-webui:latest
+    container_name: hermes-webui
+    depends_on:
+      - hermes
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      # Shared Hermes home — config.yaml, sessions, skills, memory
+      - ./data_runtime:/home/hermeswebui/.hermes
+      # Agent source (read-only) — for uv pip install of hermes-agent deps
+      - hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent:ro
+      # Workspace — browse/edit files from the WebUI
+      # Override with: HERMES_WORKSPACE=/your/path docker compose up
+      - ${HERMES_WORKSPACE:-${HOME:-/root}/workspace}:/workspace
+    environment:
+      - HERMES_WEBUI_HOST=0.0.0.0
+      - HERMES_WEBUI_PORT=8787
+      - HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui
+      - WANTED_UID=1000
+      - WANTED_GID=1000
+      # Optional: password protect the WebUI
+      # - HERMES_WEBUI_PASSWORD=${HERMES_WEBUI_PASSWORD:-}
+      # Skip credential permission fixer for bind-mounted .hermes
+      - HERMES_SKIP_CHMOD=1
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  # Agent source volume — initialized from the hermes image's /opt/hermes on first run.
+  # Both hermes (for runtime) and hermes-webui (for dependency installation) share this.
+  # IMPORTANT: after pulling a new hermes-agent image, run:
+  #   docker compose down
+  #   docker volume rm hermes_agent_docker_hermes-agent-src
+  #   docker compose pull
+  #   docker compose up -d
+  hermes-agent-src:
