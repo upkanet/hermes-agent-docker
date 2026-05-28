@@ -2,6 +2,8 @@
 
 Self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research, containerisé avec gateway Telegram et WebUI.
 
+![](./hermes.jpg)
+
 ## Fonctionnalités
 
 - **Agent IA autonome** — exécution de tâches, code, navigation web, raisonnement
