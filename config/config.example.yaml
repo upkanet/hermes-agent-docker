@@ -1,6 +1,7 @@
 # ============================================================
-# Hermes Agent - Configuration
-# Non-secret settings. Secrets (API keys) go in .env
+# Hermes Agent - Configuration (Example)
+# Copy this file to config.yaml and adjust values for your setup
+# Secrets (API keys) go in .env, not here
 # ============================================================
 
 # --- Model Configuration ---
@@ -12,15 +13,9 @@
 # - poolside/laguna-m.1:free
 # - openai/gpt-oss-120b:free
 # - z-ai/glm-4.5-air:free
-# - nvidia/nemotron-3-super-120b-a12b:free
-# - meta-llama/llama-3.3-70b-instruct:free
-# - qwen/qwen3-coder:free
-# - qwen/qwen3-next-80b-a3b-instruct:free
-# - google/gemma-4-26b-a4b-it:free
-# - google/gemma-4-31b-it:free
 model:
-  provider: copilot   # openrouter | anthropic | openai | nous | custom | ollama | google | kimi-coding | copilot
-  default: gpt-5-mini
+  provider: your-provider   # openrouter | anthropic | openai | nous | custom | ollama | google | kimi-coding | copilot
+  default: your-model
 
   # For custom providers (self-hosted, Ollama, etc.)
   # provider: custom
@@ -140,7 +135,6 @@ mcp_servers:
     timeout: 300
 
 # --- Session DB Maintenance ---
-# Keep state.db healthy over time on gateway-heavy usage.
 sessions:
   auto_prune: true
   retention_days: 60

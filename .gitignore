@@ -4,6 +4,7 @@
 
 # --- Secrets / credentials ---
 config/.env
+config/config.yaml
 .env
 .env.*
 !.env.example
@@ -55,6 +56,7 @@ tmp/
 temp/
 *.tmp
 *.cache
+.cursor
 
 # --- Python ---
 __pycache__/
