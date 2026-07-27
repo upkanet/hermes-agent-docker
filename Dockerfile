@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
+#Check PIP
+RUN /opt/hermes/.venv/bin/python -m ensurepip --upgrade
+
 # Install faster-whisper into the venv using system pip with --target fallback
 RUN /opt/hermes/.venv/bin/python -m pip install --no-cache-dir faster-whisper \
     || python3 -m pip install --no-cache-dir faster-whisper --target=/opt/hermes/.venv/lib/python3.13/site-packages/ \
